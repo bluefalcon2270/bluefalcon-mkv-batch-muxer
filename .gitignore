@@ -1,0 +1,11 @@
+# Build environments and execution artifacts
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+*.exe
+
+# Virtual environments
+venv/
+env/
