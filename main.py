@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v1.9
+# Version: v2.0
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -223,7 +223,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.9<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v2.0<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -239,7 +239,7 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.9")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v2.0")
         self.setMinimumSize(1200, 750)
         
         icon_path = Path(__file__).parent / "icon.ico"
@@ -347,6 +347,8 @@ class MainWindow(QMainWindow):
         
         # 1. Left Panel (Master)
         left_panel = QWidget()
+        # Enforce minimum width to prevent unreadable column crushing
+        left_panel.setMinimumWidth(300) 
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -355,7 +357,8 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(lbl_master)
 
         self.table_master = QTableWidget()
-        self.table_master.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Allow horizontal scrolling if panels are squished excessively
+        self.table_master.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table_master.setColumnCount(3)
         
         self.header_master = CheckBoxHeader(Qt.Orientation.Horizontal)
@@ -385,6 +388,8 @@ class MainWindow(QMainWindow):
         
         # 2. Right Panel (Detail)
         right_panel = QWidget()
+        # Enforce minimum width to prevent unreadable column crushing
+        right_panel.setMinimumWidth(400)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -393,7 +398,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(lbl_detail)
 
         self.table_detail = QTableWidget()
-        self.table_detail.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table_detail.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table_detail.setColumnCount(3)
         
         self.header_detail = CheckBoxHeader(Qt.Orientation.Horizontal)
@@ -512,6 +517,7 @@ class MainWindow(QMainWindow):
 
         self.table_master.blockSignals(False)
         
+        # Auto-select first item if available
         if self.table_master.rowCount() > 0:
             self.table_master.selectRow(0)
 
