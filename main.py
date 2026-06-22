@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v1.2
+# Version: v1.3
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -191,7 +191,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.2<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.3<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -207,15 +207,13 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.2")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.3")
         self.setMinimumSize(1100, 750)
         
-        # Load custom icon if available in the same directory
         icon_path = Path(__file__).parent / "icon.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         
-        # Core Variables
         self.target_directory = Path.cwd()
         self.scanner_worker = None
         self.action_worker = None
@@ -305,15 +303,30 @@ class MainWindow(QMainWindow):
         self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tree.setAlternatingRowColors(True)
         self.tree.setIndentation(20)
+        self.tree.setWordWrap(False)
+        
+        # Horizontal scrolling configuration to prevent elements from going off-screen invisibly
+        self.tree.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         header = self.tree.header()
         header.setMinimumHeight(46) 
+        header.setStretchLastSection(False) 
         
+        # Interactive columns with intelligent default widths to maintain viewability
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.tree.setColumnWidth(0, 40)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setColumnWidth(0, 50)
+        
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.tree.setColumnWidth(1, 550) 
+        
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        self.tree.setColumnWidth(2, 150)
+        
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        
+        # Connect checkbox cascade logic
+        self.tree.itemChanged.connect(self._on_item_changed)
         
         tree_layout.addWidget(self.tree, 0, 0)
 
@@ -365,20 +378,83 @@ class MainWindow(QMainWindow):
         dlg = AboutDialog(self)
         dlg.exec()
 
+    def _on_item_changed(self, item: QTreeWidgetItem, column: int):
+        # Handle 3-state checkbox logic cascading between parent and children
+        if column == 0:
+            self.tree.blockSignals(True)
+            state = item.checkState(0)
+            
+            # If the interacted item is a Parent
+            if item.parent() is None:
+                for i in range(item.childCount()):
+                    child = item.child(i)
+                    if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                        child.setCheckState(0, state)
+            
+            # If the interacted item is a Child
+            else:
+                parent = item.parent()
+                checked_count = 0
+                total_checkable = 0
+                
+                for i in range(parent.childCount()):
+                    child = parent.child(i)
+                    if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                        total_checkable += 1
+                        if child.checkState(0) == Qt.CheckState.Checked:
+                            checked_count += 1
+                            
+                if checked_count == total_checkable and total_checkable > 0:
+                    parent.setCheckState(0, Qt.CheckState.Checked)
+                elif checked_count == 0:
+                    parent.setCheckState(0, Qt.CheckState.Unchecked)
+                else:
+                    parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+                    
+            self.tree.blockSignals(False)
+
     def _set_all_checkboxes(self, state: Qt.CheckState):
+        self.tree.blockSignals(True)
         for i in range(self.tree.topLevelItemCount()):
             item = self.tree.topLevelItem(i)
             if item and not item.isDisabled():
                 item.setCheckState(0, state)
+                for j in range(item.childCount()):
+                    child = item.child(j)
+                    if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                        child.setCheckState(0, state)
+        self.tree.blockSignals(False)
 
     def _get_selected_tasks(self) -> list[dict]:
         selected = []
         for i in range(self.tree.topLevelItemCount()):
-            item = self.tree.topLevelItem(i)
-            if item and item.checkState(0) == Qt.CheckState.Checked:
-                task_index = item.data(0, Qt.ItemDataRole.UserRole)
+            parent = self.tree.topLevelItem(i)
+            
+            # Only process if the parent is fully or partially checked
+            if parent and parent.checkState(0) != Qt.CheckState.Unchecked:
+                task_index = parent.data(0, Qt.ItemDataRole.UserRole)
+                
                 if task_index is not None and task_index in self.current_file_data:
-                    selected.append(self.current_file_data[task_index])
+                    base_info = self.current_file_data[task_index]
+                    
+                    selected_attachments = []
+                    video_selected = False
+                    
+                    # Interrogate children to see exactly which files are checked
+                    for j in range(parent.childCount()):
+                        child = parent.child(j)
+                        if child.checkState(0) == Qt.CheckState.Checked:
+                            path = child.data(0, Qt.ItemDataRole.UserRole)
+                            if child.text(2) == "Source Video":
+                                video_selected = True
+                            else:
+                                selected_attachments.append(path)
+                                
+                    # Only execute if the core video is checked and at least one attachment is provided
+                    if video_selected and selected_attachments:
+                        task = base_info.copy()
+                        task["attachment_paths"] = selected_attachments
+                        selected.append(task)
         return selected
 
     def _refresh_tree(self):
@@ -391,6 +467,7 @@ class MainWindow(QMainWindow):
         self.scanner_worker.start()
 
     def _populate_tree(self, data: list[dict]):
+        self.tree.blockSignals(True)
         self.tree.clear()
         
         for i, info in enumerate(data):
@@ -398,22 +475,20 @@ class MainWindow(QMainWindow):
             
             # 1. Create Parent Group Item
             parent = QTreeWidgetItem(self.tree)
-            parent.setData(0, Qt.ItemDataRole.UserRole, i) # Store index reference
+            parent.setData(0, Qt.ItemDataRole.UserRole, i)
             
             if info["has_attachments"]:
                 parent.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 current_header_state = Qt.CheckState.Checked if self.checkbox_header._is_on else Qt.CheckState.Unchecked
                 parent.setCheckState(0, current_header_state)
             else:
-                parent.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable)
-                parent.setCheckState(0, Qt.CheckState.Unchecked)
+                parent.setFlags(Qt.ItemFlag.ItemIsSelectable)
                 parent.setDisabled(True)
 
-            parent.setText(1, info["basename"])
+            parent.setText(1, f"📁 {info['basename']}")
             parent.setText(2, "Output Group" if info["has_attachments"] else "-")
             parent.setText(3, info["status"])
             
-            # Make parent bold
             font = parent.font(1)
             font.setBold(True)
             parent.setFont(1, font)
@@ -424,8 +499,14 @@ class MainWindow(QMainWindow):
             child_vid = QTreeWidgetItem(parent)
             child_vid.setText(1, f"🎬 {info['video_name']}")
             child_vid.setText(2, "Source Video")
-            child_vid.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            child_vid.setData(0, Qt.ItemDataRole.UserRole, info["video_path"])
             
+            if info["has_attachments"]:
+                child_vid.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                child_vid.setCheckState(0, current_header_state)
+            else:
+                child_vid.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+
             # 3. Add Attachment Children
             for att_path in info["attachment_paths"]:
                 att_name = os.path.basename(att_path)
@@ -435,17 +516,20 @@ class MainWindow(QMainWindow):
                 child_att = QTreeWidgetItem(parent)
                 child_att.setText(1, f"{icon} {att_name}")
                 child_att.setText(2, "Audio Track" if ext == 'mka' else "Subtitle Track")
-                child_att.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                child_att.setData(0, Qt.ItemDataRole.UserRole, att_path)
+                
+                child_att.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                child_att.setCheckState(0, current_header_state)
 
-            # Keep items expanded so the user sees exactly what is grouped
             parent.setExpanded(True)
 
+        self.tree.blockSignals(False)
         self.btn_refresh.raise_()
 
     def _start_muxing(self):
         selected_tasks = self._get_selected_tasks()
         if not selected_tasks:
-            QMessageBox.information(self, "No Selection", "Please check the box next to at least one ready group to process.")
+            QMessageBox.information(self, "No Selection", "Please verify that at least one valid video and its attachments are checked.")
             return
 
         exe_path = self.entry_exe_path.text().strip()
