@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v1.6
+# Version: v1.7
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -223,7 +223,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.6<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.7<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -239,7 +239,7 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.6")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.7")
         self.setMinimumSize(1200, 750)
         
         icon_path = Path(__file__).parent / "icon.ico"
@@ -250,7 +250,6 @@ class MainWindow(QMainWindow):
         self.scanner_worker = None
         self.action_worker = None
         
-        # State Dictionary holding all UI checkbox decisions
         self.data_state = {}
         self.current_selected_task_id = None
 
@@ -269,7 +268,7 @@ class MainWindow(QMainWindow):
             QPushButton { background-color: #A8C7FA; border: none; border-radius: 6px; color: #062E6F; font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; font-size: 14px; padding: 4px; }
             QPushButton:hover { background-color: #D3E3FD; }
             QPushButton:disabled { background-color: #44474A; color: #8E918F; }
-            QPushButton#overlay_btn { background-color: #2B2D31; border: 1px solid #44474A; border-radius: 6px; font-size: 16px; font-weight: bold; color: #A8C7FA; }
+            QPushButton#overlay_btn { background-color: #2B2D31; border: 1px solid #44474A; border-radius: 6px; font-size: 16px; font-weight: bold; color: #A8C7FA; padding: 0px; }
             QPushButton#overlay_btn:hover { background-color: #383A40; color: #D3E3FD; }
             QTextEdit { background-color: #1E1F22; border: 1px solid #44474A; color: #A0A0A0; padding: 10px; border-radius: 6px; font-family: Consolas, monospace; font-size: 13px; }
             QTableWidget { background-color: #1E1F22; border: 1px solid #44474A; border-radius: 6px; color: #E3E3E3; gridline-color: transparent; outline: none; }
@@ -277,7 +276,7 @@ class MainWindow(QMainWindow):
             QTableWidget::item { padding: 8px; border-bottom: 1px solid #2B2D31; }
             QTableWidget::item:selected { background-color: #35383D; color: #FFFFFF; }
             QSplitter::handle { background-color: #44474A; width: 2px; }
-            QLabel#panel_title { font-weight: bold; font-size: 15px; color: #A8C7FA; margin-bottom: 5px; }
+            QLabel#panel_title { font-weight: bold; font-size: 14px; color: #E3E3E3; }
         """)
 
     def _init_ui(self):
@@ -345,22 +344,17 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         
         left_header_layout = QHBoxLayout()
+        left_header_layout.setContentsMargins(0, 0, 0, 5)
         lbl_master = QLabel("Media Groups")
         lbl_master.setObjectName("panel_title")
         left_header_layout.addWidget(lbl_master)
-        
         left_header_layout.addStretch()
-        self.btn_refresh = QPushButton("↻")
-        self.btn_refresh.setObjectName("overlay_btn")
-        self.btn_refresh.setFixedSize(30, 30)
-        self.btn_refresh.setToolTip("Refresh Directory")
-        self.btn_refresh.clicked.connect(self._refresh_data)
-        left_header_layout.addWidget(self.btn_refresh)
-        
         left_layout.addLayout(left_header_layout)
 
         self.table_master = QTableWidget()
+        self.table_master.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table_master.setColumnCount(3)
+        
         self.header_master = CheckBoxHeader(Qt.Orientation.Horizontal)
         self.header_master.stateChanged.connect(self._master_header_toggled)
         self.table_master.setHorizontalHeader(self.header_master)
@@ -372,10 +366,10 @@ class MainWindow(QMainWindow):
         
         h_master = self.table_master.horizontalHeader()
         h_master.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table_master.setColumnWidth(0, 40)
+        self.table_master.setColumnWidth(0, 30) # Tightened for center alignment effect
         h_master.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         h_master.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.table_master.setColumnWidth(2, 100)
+        self.table_master.setColumnWidth(2, 80)
         
         self.table_master.itemSelectionChanged.connect(self._on_master_selection)
         self.table_master.itemChanged.connect(self._on_master_item_changed)
@@ -387,12 +381,27 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         
+        right_header_layout = QHBoxLayout()
+        right_header_layout.setContentsMargins(0, 0, 0, 5)
+        right_header_layout.setSpacing(8)
+        
+        self.btn_refresh = QPushButton("↻")
+        self.btn_refresh.setObjectName("overlay_btn")
+        self.btn_refresh.setFixedSize(26, 26)
+        self.btn_refresh.setToolTip("Refresh Directory")
+        self.btn_refresh.clicked.connect(self._refresh_data)
+        right_header_layout.addWidget(self.btn_refresh)
+        
         lbl_detail = QLabel("Tracks (Files to Mux)")
         lbl_detail.setObjectName("panel_title")
-        right_layout.addWidget(lbl_detail)
+        right_header_layout.addWidget(lbl_detail)
+        right_header_layout.addStretch()
+        right_layout.addLayout(right_header_layout)
 
         self.table_detail = QTableWidget()
+        self.table_detail.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table_detail.setColumnCount(3)
+        
         self.header_detail = CheckBoxHeader(Qt.Orientation.Horizontal)
         self.header_detail.stateChanged.connect(self._detail_header_toggled)
         self.table_detail.setHorizontalHeader(self.header_detail)
@@ -403,10 +412,10 @@ class MainWindow(QMainWindow):
         
         h_detail = self.table_detail.horizontalHeader()
         h_detail.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table_detail.setColumnWidth(0, 40)
+        self.table_detail.setColumnWidth(0, 30) # Tightened for center alignment effect
         h_detail.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         h_detail.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.table_detail.setColumnWidth(2, 140)
+        self.table_detail.setColumnWidth(2, 120)
         
         self.table_detail.itemChanged.connect(self._on_detail_item_changed)
 
@@ -414,7 +423,7 @@ class MainWindow(QMainWindow):
 
         self.splitter.addWidget(left_panel)
         self.splitter.addWidget(right_panel)
-        self.splitter.setSizes([450, 700]) # Default ratio
+        self.splitter.setSizes([450, 700]) 
         
         main_layout.addWidget(self.splitter, stretch=2)
 
@@ -499,7 +508,6 @@ class MainWindow(QMainWindow):
             
             # Status
             status_item = QTableWidgetItem(info["status"])
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table_master.setItem(row, 2, status_item)
 
         self.table_master.blockSignals(False)
@@ -603,7 +611,6 @@ class MainWindow(QMainWindow):
                 active_tracks = [t for t in info["tracks"] if t["active"]]
                 video_track = next((t for t in active_tracks if t["type"] == "Source Video"), None)
                 
-                # We only process if there is a video and at least one other track selected
                 if video_track and len(active_tracks) > 1:
                     tasks_to_run.append({
                         "basename": info["basename"],
