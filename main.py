@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v1.7
+# Version: v1.8
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -223,7 +223,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.7<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.8<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -239,7 +239,7 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.7")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.8")
         self.setMinimumSize(1200, 750)
         
         icon_path = Path(__file__).parent / "icon.ico"
@@ -276,7 +276,7 @@ class MainWindow(QMainWindow):
             QTableWidget::item { padding: 8px; border-bottom: 1px solid #2B2D31; }
             QTableWidget::item:selected { background-color: #35383D; color: #FFFFFF; }
             QSplitter::handle { background-color: #44474A; width: 2px; }
-            QLabel#panel_title { font-weight: bold; font-size: 14px; color: #E3E3E3; }
+            QLabel#panel_title { font-weight: bold; font-size: 14px; color: #E3E3E3; margin-bottom: 5px; }
         """)
 
     def _init_ui(self):
@@ -322,6 +322,13 @@ class MainWindow(QMainWindow):
 
         top_bar.addStretch()
 
+        self.btn_refresh = QPushButton("↻")
+        self.btn_refresh.setObjectName("overlay_btn")
+        self.btn_refresh.setFixedSize(36, 36)
+        self.btn_refresh.setToolTip("Refresh Directory")
+        self.btn_refresh.clicked.connect(self._refresh_data)
+        top_bar.addWidget(self.btn_refresh)
+
         self.btn_run = QPushButton("Run Batch Muxer")
         self.btn_run.setFixedSize(160, 36)
         self.btn_run.clicked.connect(self._start_muxing)
@@ -343,13 +350,9 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         
-        left_header_layout = QHBoxLayout()
-        left_header_layout.setContentsMargins(0, 0, 0, 5)
         lbl_master = QLabel("Media Groups")
         lbl_master.setObjectName("panel_title")
-        left_header_layout.addWidget(lbl_master)
-        left_header_layout.addStretch()
-        left_layout.addLayout(left_header_layout)
+        left_layout.addWidget(lbl_master)
 
         self.table_master = QTableWidget()
         self.table_master.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -366,7 +369,7 @@ class MainWindow(QMainWindow):
         
         h_master = self.table_master.horizontalHeader()
         h_master.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table_master.setColumnWidth(0, 30) # Tightened for center alignment effect
+        self.table_master.setColumnWidth(0, 30)
         h_master.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         h_master.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.table_master.setColumnWidth(2, 80)
@@ -381,22 +384,9 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         
-        right_header_layout = QHBoxLayout()
-        right_header_layout.setContentsMargins(0, 0, 0, 5)
-        right_header_layout.setSpacing(8)
-        
-        self.btn_refresh = QPushButton("↻")
-        self.btn_refresh.setObjectName("overlay_btn")
-        self.btn_refresh.setFixedSize(26, 26)
-        self.btn_refresh.setToolTip("Refresh Directory")
-        self.btn_refresh.clicked.connect(self._refresh_data)
-        right_header_layout.addWidget(self.btn_refresh)
-        
         lbl_detail = QLabel("Tracks (Files to Mux)")
         lbl_detail.setObjectName("panel_title")
-        right_header_layout.addWidget(lbl_detail)
-        right_header_layout.addStretch()
-        right_layout.addLayout(right_header_layout)
+        right_layout.addWidget(lbl_detail)
 
         self.table_detail = QTableWidget()
         self.table_detail.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -412,7 +402,7 @@ class MainWindow(QMainWindow):
         
         h_detail = self.table_detail.horizontalHeader()
         h_detail.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table_detail.setColumnWidth(0, 30) # Tightened for center alignment effect
+        self.table_detail.setColumnWidth(0, 30)
         h_detail.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         h_detail.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.table_detail.setColumnWidth(2, 120)
@@ -501,6 +491,7 @@ class MainWindow(QMainWindow):
             
             # Name
             name_item = QTableWidgetItem(f"📁 {info['basename']}")
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             font = name_item.font()
             font.setBold(True)
             name_item.setFont(font)
@@ -508,6 +499,7 @@ class MainWindow(QMainWindow):
             
             # Status
             status_item = QTableWidgetItem(info["status"])
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.table_master.setItem(row, 2, status_item)
 
         self.table_master.blockSignals(False)
@@ -560,19 +552,20 @@ class MainWindow(QMainWindow):
             chk = QTableWidgetItem()
             chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             chk.setCheckState(Qt.CheckState.Checked if track["active"] else Qt.CheckState.Unchecked)
-            chk.setData(Qt.ItemDataRole.UserRole, row) # Store track index
+            chk.setData(Qt.ItemDataRole.UserRole, row)
             self.table_detail.setItem(row, 0, chk)
             
             if track["active"]: none_checked = False
             else: all_checked = False
             
             name_item = QTableWidgetItem(f"{track['icon']} {track['name']}")
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table_detail.setItem(row, 1, name_item)
             
             type_item = QTableWidgetItem(track["type"])
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             self.table_detail.setItem(row, 2, type_item)
             
-        # Update detail header state visually without triggering signals
         self.header_detail.blockSignals(True)
         if all_checked and len(tracks) > 0: self.header_detail._is_on = True
         elif none_checked: self.header_detail._is_on = False
