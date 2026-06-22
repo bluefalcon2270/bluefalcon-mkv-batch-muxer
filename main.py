@@ -1,151 +1,472 @@
 # ==========================================
+# Version: v1.1
 # BlueFalcon MKV Batch Muxer
-# Version: v1.0
-# Author: BlueFalcon
 # ==========================================
 
 import os
 import subprocess
-import threading
-import customtkinter as ctk
-from tkinter import filedialog
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
-# Set up modern dark theme
-ctk.set_appearance_mode("System")
-ctk.set_default_color_theme("blue")
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QLineEdit, QPushButton, QTextEdit, QMessageBox, QGridLayout, 
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, 
+    QDialog, QStyle, QStyleOptionButton, QApplication, QFileDialog
+)
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QRect, QThread
+import sys
 
-class MKVMuxerGUI(ctk.CTk):
+# --- Logging Setup ---
+LOG_FILE = Path(__file__).parent / "bluefalcon-mkv-muxer.log"
+
+class GUILogHandler(logging.Handler, QObject):
+    log_signal = pyqtSignal(str)
+    
+    def __init__(self):
+        logging.Handler.__init__(self)
+        QObject.__init__(self)
+
+    def emit(self, record):
+        msg = self.format(record)
+        self.log_signal.emit(msg)
+
+logger = logging.getLogger("BlueFalconMKV")
+logger.setLevel(logging.INFO)
+formatter = logging.Formatter('[%(asctime)s] %(message)s', datefmt='%H:%M:%S')
+
+file_handler = RotatingFileHandler(LOG_FILE, maxBytes=1024*1024*5, backupCount=2, encoding='utf-8')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+gui_handler = GUILogHandler()
+gui_handler.setFormatter(formatter)
+logger.addHandler(gui_handler)
+
+# --- Background Workers ---
+class ScannerWorker(QThread):
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, target_dir: Path):
+        super().__init__()
+        self.target_dir = target_dir
+
+    def run(self):
+        try:
+            data = []
+            if not self.target_dir.exists() or not self.target_dir.is_dir():
+                self.finished.emit(data)
+                return
+
+            mkv_files = [f for f in self.target_dir.iterdir() if f.is_file() and f.suffix.lower() == '.mkv']
+            
+            for mkv in mkv_files:
+                basename = mkv.stem
+                attachments = []
+                
+                # Scan for matching external tracks
+                for f in self.target_dir.iterdir():
+                    if f.is_file() and f.name != mkv.name and f.name.lower().startswith(basename.lower()):
+                        if f.suffix.lower() in ['.mka', '.srt', '.ass', '.ssa', '.vtt', '.sup']:
+                            attachments.append(f)
+                
+                status = "Ready" if attachments else "No Attachments"
+                
+                data.append({
+                    "video_path": str(mkv),
+                    "video_name": mkv.name,
+                    "basename": basename,
+                    "attachment_names": ", ".join([f.name for f in attachments]),
+                    "attachment_paths": [str(f) for f in attachments],
+                    "status": status,
+                    "has_attachments": bool(attachments)
+                })
+                
+            self.finished.emit(data)
+        except Exception as e:
+            self.error.emit(str(e))
+
+class ActionWorker(QThread):
+    log_msg = pyqtSignal(str)
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, mkvmerge_path: str, target_dir: Path, tasks: list):
+        super().__init__()
+        self.mkvmerge_path = mkvmerge_path
+        self.target_dir = target_dir
+        self.tasks = tasks
+
+    def run(self):
+        try:
+            if not os.path.exists(self.mkvmerge_path):
+                self.log_msg.emit(f"[ERROR] mkvmerge.exe not found at '{self.mkvmerge_path}'")
+                self.finished.emit()
+                return
+
+            output_dir = self.target_dir / "output"
+            output_dir.mkdir(exist_ok=True)
+            self.log_msg.emit(f"[INFO] Output directory ready at: {output_dir}")
+            self.log_msg.emit("=" * 50)
+
+            for task in self.tasks:
+                if not task["has_attachments"]:
+                    self.log_msg.emit(f"[SKIPPED] {task['video_name']} - No attachments selected.")
+                    continue
+
+                out_file = output_dir / task['video_name']
+                cmd = [self.mkvmerge_path, "-o", str(out_file), task['video_path']]
+                cmd.extend(task['attachment_paths'])
+
+                self.log_msg.emit(f"[PROCESSING] {task['video_name']}")
+                
+                # Run subprocess
+                result = subprocess.run(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE, 
+                    text=True, 
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+                
+                if result.returncode == 0 or result.returncode == 1:
+                    self.log_msg.emit(f"[SUCCESS] Merged: {task['video_name']}")
+                else:
+                    self.log_msg.emit(f"[ERROR] Failed merging {task['video_name']}. Code: {result.returncode}")
+                
+                self.log_msg.emit("-" * 50)
+
+            self.log_msg.emit("[DONE] All batch tasks completed.")
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
+# --- UI Components ---
+class CheckBoxHeader(QHeaderView):
+    stateChanged = pyqtSignal(Qt.CheckState)
+
+    def __init__(self, orientation=Qt.Orientation.Horizontal, parent=None):
+        super().__init__(orientation, parent)
+        self._is_on = True
+
+    def paintSection(self, painter, rect, logicalIndex):
+        painter.save()
+        super().paintSection(painter, rect, logicalIndex)
+        painter.restore()
+
+        if logicalIndex == 0:
+            option = QStyleOptionButton()
+            option.rect = QRect(rect.x() + 4, rect.y() + rect.height() // 2 - 9, 18, 18)
+            option.state = QStyle.StateFlag.State_Enabled | QStyle.StateFlag.State_Active
+            if self._is_on:
+                option.state |= QStyle.StateFlag.State_On
+            else:
+                option.state |= QStyle.StateFlag.State_Off
+            self.style().drawControl(QStyle.ControlElement.CE_CheckBox, option, painter)
+
+    def mousePressEvent(self, event):
+        logicalIndex = self.logicalIndexAt(event.pos())
+        if logicalIndex == 0:
+            self._is_on = not self._is_on
+            state = Qt.CheckState.Checked if self._is_on else Qt.CheckState.Unchecked
+            self.stateChanged.emit(state)
+            self.viewport().update()
+        super().mousePressEvent(event)
+
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("About")
+        self.setFixedSize(350, 200)
+        self.setStyleSheet("""
+            QDialog { background-color: #2B2D31; color: white; border-radius: 8px; }
+            QLabel { font-size: 14px; }
+            QPushButton { background-color: #A8C7FA; border: none; padding: 6px 12px; border-radius: 4px; color: #062E6F; font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; font-size: 14px; }
+            QPushButton:hover { background-color: #D3E3FD; }
+            a { color: #A8C7FA; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+        """)
+        
+        layout = QVBoxLayout(self)
+        title = QLabel(
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.1<br><br>"
+            "Created by BlueFalcon<br><br>"
+            "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
+        )
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setOpenExternalLinks(True)
+        
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(self.accept)
+        
+        layout.addWidget(title)
+        layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignCenter)
+
+class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.1")
+        self.setMinimumSize(1100, 750)
         
-        self.title("BlueFalcon MKV Batch Muxer v1.0")
-        self.geometry("650x500")
-        
-        # Configuration Variables
-        self.mkvmerge_path = ctk.StringVar(value=r"C:\Program Files\MKVToolNix\mkvmerge.exe")
-        self.source_dir = ctk.StringVar(value="")
-        
-        # --- UI LAYOUT ---
-        # 1. MKVToolNix Path Selection
-        self.path_frame = ctk.CTkFrame(self)
-        self.path_frame.pack(pady=10, padx=20, fill="x")
-        
-        self.lbl_path = ctk.CTkLabel(self.path_frame, text="mkvmerge.exe Path:")
-        self.lbl_path.pack(side="left", padx=10, pady=10)
-        
-        self.entry_path = ctk.CTkEntry(self.path_frame, textvariable=self.mkvmerge_path, width=350)
-        self.entry_path.pack(side="left", padx=5, expand=True, fill="x")
-        
-        self.btn_browse_exe = ctk.CTkButton(self.path_frame, text="Browse", width=80, command=self.browse_mkvmerge)
-        self.btn_browse_exe.pack(side="right", padx=10)
+        # Core Variables
+        self.target_directory = Path.cwd()
+        self.scanner_worker = None
+        self.action_worker = None
+        self.current_file_data = {}
 
-        # 2. Source Directory Selection
-        self.dir_frame = ctk.CTkFrame(self)
-        self.dir_frame.pack(pady=10, padx=20, fill="x")
+        self._apply_dark_theme()
+        self._init_ui()
         
-        self.lbl_dir = ctk.CTkLabel(self.dir_frame, text="Working Directory:")
-        self.lbl_dir.pack(side="left", padx=10, pady=10)
+        logger.info(f"System initialized. Current working directory: {self.target_directory}")
+        self._refresh_table()
+
+    def _apply_dark_theme(self):
+        self.setStyleSheet("""
+            QMainWindow { background-color: #1E1F22; }
+            QWidget { color: #E3E3E3; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; }
+            QLineEdit { background-color: #2B2D31; border: 1px solid #44474A; padding: 0px 10px; border-radius: 6px; color: #FFFFFF; font-size: 13px; }
+            QLineEdit:focus { border: 1px solid #A8C7FA; }
+            QPushButton { background-color: #A8C7FA; border: none; border-radius: 6px; color: #062E6F; font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; font-size: 14px; padding: 4px; }
+            QPushButton:hover { background-color: #D3E3FD; }
+            QPushButton:disabled { background-color: #44474A; color: #8E918F; }
+            QPushButton#danger { background-color: #F2B8B5; color: #601410; }
+            QPushButton#danger:hover { background-color: #F9DEDC; }
+            QPushButton#overlay_btn { background-color: #2B2D31; border: 1px solid #44474A; border-radius: 6px; font-size: 16px; font-weight: bold; color: #A8C7FA; }
+            QPushButton#overlay_btn:hover { background-color: #383A40; color: #D3E3FD; }
+            QTextEdit { background-color: #1E1F22; border: 1px solid #44474A; color: #A0A0A0; padding: 10px; border-radius: 6px; font-family: Consolas, monospace; font-size: 13px; }
+            QTableWidget { background-color: #1E1F22; alternate-background-color: #242528; border: 1px solid #44474A; border-radius: 6px; color: #E3E3E3; gridline-color: transparent; }
+            QHeaderView::section { background-color: #1E1F22; color: #A8C7FA; padding: 4px; border: none; border-bottom: 1px solid #44474A; font-weight: bold; font-size: 13px; }
+            QTableWidget::item { padding: 6px; border-bottom: 1px solid #2B2D31; }
+            QTableWidget::item:selected { background-color: #35383D; }
+        """)
+
+    def _init_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+
+        # --- Top Action Bar ---
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(10)
         
-        self.entry_dir = ctk.CTkEntry(self.dir_frame, textvariable=self.source_dir, width=350, placeholder_text="Select folder containing MKV files...")
-        self.entry_dir.pack(side="left", padx=5, expand=True, fill="x")
+        lbl_path = QLabel("mkvmerge.exe:")
+        lbl_path.setStyleSheet("font-weight: bold;")
+        top_bar.addWidget(lbl_path)
+
+        self.entry_exe_path = QLineEdit()
+        self.entry_exe_path.setText(r"C:\Program Files\MKVToolNix\mkvmerge.exe")
+        self.entry_exe_path.setFixedSize(300, 36)
+        top_bar.addWidget(self.entry_exe_path)
+
+        btn_browse_exe = QPushButton("Browse")
+        btn_browse_exe.setFixedSize(80, 36)
+        btn_browse_exe.clicked.connect(self._browse_exe)
+        top_bar.addWidget(btn_browse_exe)
+
+        top_bar.addStretch()
+
+        self.btn_run = QPushButton("Run Batch Muxer")
+        self.btn_run.setFixedSize(180, 36)
+        self.btn_run.clicked.connect(self._start_muxing)
+        top_bar.addWidget(self.btn_run)
+
+        btn_about = QPushButton("ⓘ")
+        btn_about.setObjectName("overlay_btn")
+        btn_about.setFixedSize(36, 36)
+        btn_about.clicked.connect(self._show_about)
+        top_bar.addWidget(btn_about)
+
+        main_layout.addLayout(top_bar)
+
+        # --- Data Table ---
+        table_container = QWidget()
+        table_layout = QGridLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
         
-        self.btn_browse_dir = ctk.CTkButton(self.dir_frame, text="Browse", width=80, command=self.browse_directory)
-        self.btn_browse_dir.pack(side="right", padx=10)
+        self.checkbox_header = CheckBoxHeader(Qt.Orientation.Horizontal)
+        self.checkbox_header.stateChanged.connect(self._set_all_checkboxes)
+        self.table.setHorizontalHeader(self.checkbox_header)
+        
+        self.table.setHorizontalHeaderLabels(["", "#", "Base Name", "Video File", "Detected Attachments", "Status"])
+        
+        for i in range(6):
+            item = self.table.horizontalHeaderItem(i)
+            if item:
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # 3. Log Output Window
-        self.log_text = ctk.CTkTextbox(self, height=220, activate_scrollbars=True)
-        self.log_text.pack(pady=10, padx=20, fill="both", expand=True)
-        self.log_text.insert("0.0", "System ready. Select a working directory containing your MKV, MKA, and subtitle files.\n\n")
-        self.log_text.configure(state="disabled")
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setShowGrid(False)
+        
+        header = self.table.horizontalHeader()
+        header.setMinimumHeight(46) 
+        
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 40)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        
+        table_layout.addWidget(self.table, 0, 0)
 
-        # 4. Action Button
-        self.btn_start = ctk.CTkButton(self, text="Start Batch Merge", command=self.start_processing_thread, height=40, font=("Arial", 14, "bold"))
-        self.btn_start.pack(pady=15, padx=20, fill="x")
+        refresh_wrapper = QWidget()
+        refresh_box = QVBoxLayout(refresh_wrapper)
+        refresh_box.setContentsMargins(0, 8, 8, 0) 
+        
+        self.btn_refresh = QPushButton("↻")
+        self.btn_refresh.setObjectName("overlay_btn")
+        self.btn_refresh.setFixedSize(30, 30)
+        self.btn_refresh.setToolTip("Refresh Directory")
+        self.btn_refresh.clicked.connect(self._refresh_table)
+        refresh_box.addWidget(self.btn_refresh)
+        
+        table_layout.addWidget(refresh_wrapper, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        main_layout.addWidget(table_container, stretch=2)
 
-    def log(self, message):
-        self.log_text.configure(state="normal")
-        self.log_text.insert("end", message + "\n")
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
+        # --- Log Viewer ---
+        log_container = QWidget()
+        log_layout = QGridLayout(log_container)
+        log_layout.setContentsMargins(0, 0, 0, 0)
 
-    def browse_mkvmerge(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Executable Files", "*.exe")])
+        self.log_viewer = QTextEdit()
+        self.log_viewer.setReadOnly(True)
+        log_layout.addWidget(self.log_viewer, 0, 0)
+
+        clear_wrapper = QWidget()
+        clear_box = QVBoxLayout(clear_wrapper)
+        clear_box.setContentsMargins(0, 8, 8, 0)
+        
+        self.btn_clear_log = QPushButton("✕")
+        self.btn_clear_log.setObjectName("overlay_btn")
+        self.btn_clear_log.setFixedSize(30, 30)
+        self.btn_clear_log.setToolTip("Clear Terminal Log")
+        self.btn_clear_log.clicked.connect(self.log_viewer.clear)
+        clear_box.addWidget(self.btn_clear_log)
+
+        log_layout.addWidget(clear_wrapper, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        main_layout.addWidget(log_container, stretch=1)
+        
+        gui_handler.log_signal.connect(self.log_viewer.append)
+
+    def _browse_exe(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select mkvmerge.exe", "", "Executable Files (*.exe)")
         if file_path:
-            self.mkvmerge_path.set(file_path)
+            self.entry_exe_path.setText(file_path)
 
-    def browse_directory(self):
-        folder_path = filedialog.askdirectory()
-        if folder_path:
-            self.source_dir.set(folder_path)
-            self.log(f"[INFO] Working directory changed to: {folder_path}")
+    def _show_about(self):
+        dlg = AboutDialog(self)
+        dlg.exec()
 
-    def start_processing_thread(self):
-        # Run processing in a background thread so the GUI doesn't freeze
-        threading.Thread(target=self.process_files, daemon=True).start()
+    def _set_all_checkboxes(self, state: Qt.CheckState):
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.flags() & Qt.ItemFlag.ItemIsEnabled:
+                item.setCheckState(state)
 
-    def process_files(self):
-        mkvmerge = self.mkvmerge_path.get()
-        working_dir = self.source_dir.get()
+    def _get_selected_tasks(self) -> list[dict]:
+        selected = []
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.checkState() == Qt.CheckState.Checked:
+                if row in self.current_file_data:
+                    selected.append(self.current_file_data[row])
+        return selected
 
-        if not os.path.exists(mkvmerge):
-            self.log(f"[ERROR] mkvmerge.exe not found at '{mkvmerge}'")
-            return
+    def _refresh_table(self):
+        self.table.setRowCount(0)
+        self.current_file_data.clear()
         
-        if not working_dir or not os.path.exists(working_dir):
-            self.log("[ERROR] Please select a valid working directory first.")
-            return
+        self.scanner_worker = ScannerWorker(self.target_directory)
+        self.scanner_worker.finished.connect(self._populate_table)
+        self.scanner_worker.error.connect(lambda e: logger.error(f"Scan Error: {e}"))
+        self.scanner_worker.start()
 
-        self.btn_start.configure(state="disabled")
-        output_dir = os.path.join(working_dir, "output")
-        os.makedirs(output_dir, exist_ok=True)
-
-        files = os.listdir(working_dir)
-        mkv_files = [f for f in files if f.lower().endswith('.mkv')]
-
-        if not mkv_files:
-            self.log("[INFO] No .mkv files found in the chosen directory.")
-            self.btn_start.configure(state="normal")
-            return
-
-        for filename in mkv_files:
-            basename = os.path.splitext(filename)[0]
-            video_path = os.path.join(working_dir, filename)
+    def _populate_table(self, data: list[dict]):
+        self.table.setRowCount(len(data))
+        for row, info in enumerate(data):
+            self.current_file_data[row] = info
             
-            extra_args = []
-            
-            # Look for matching audio
-            for f in files:
-                if f.lower().startswith(basename.lower()) and f.lower().endswith('.mka') and f != filename:
-                    extra_args.append(os.path.join(working_dir, f))
-                    
-            # Look for matching subtitles
-            sub_extensions = ('.srt', '.ass', '.ssa', '.vtt', '.sup')
-            for f in files:
-                if f.lower().startswith(basename.lower()) and f.lower().endswith(sub_extensions):
-                    extra_args.append(os.path.join(working_dir, f))
-
-            if extra_args:
-                self.log(f"[PROCESSING] {filename}")
-                out_file = os.path.join(output_dir, filename)
-                
-                # Formulate the mkvmerge command array
-                cmd = [mkvmerge, "-o", out_file, video_path] + extra_args
-                
-                try:
-                    # Run hidden in background
-                    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                    if result.returncode == 0 or result.returncode == 1: # 1 is usually a warning, still success
-                        self.log(f"[SUCCESS] Merged into output\\{filename}")
-                    else:
-                        self.log(f"[ERROR] Failed merging {filename}. Code: {result.returncode}")
-                except Exception as e:
-                    self.log(f"[CRITICAL] Error: {str(e)}")
+            chk = QTableWidgetItem()
+            if info["has_attachments"]:
+                chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+                current_header_state = Qt.CheckState.Checked if self.checkbox_header._is_on else Qt.CheckState.Unchecked
+                chk.setCheckState(current_header_state)
             else:
-                self.log(f"[SKIPPED] {filename} (No matching attachments found)")
+                chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable)
+                chk.setCheckState(Qt.CheckState.Unchecked)
 
-        self.log("\n[DONE] All tasks completed!")
-        self.btn_start.configure(state="normal")
+            self.table.setItem(row, 0, chk)
+            self.table.setItem(row, 1, QTableWidgetItem(str(row + 1)))
+            self.table.setItem(row, 2, QTableWidgetItem(info["basename"]))
+            self.table.setItem(row, 3, QTableWidgetItem(info["video_name"]))
+            
+            att_item = QTableWidgetItem(info["attachment_names"] if info["has_attachments"] else "-")
+            if not info["has_attachments"]:
+                att_item.setForeground(Qt.GlobalColor.darkGray)
+            self.table.setItem(row, 4, att_item)
+            
+            status_item = QTableWidgetItem(info["status"])
+            if not info["has_attachments"]:
+                status_item.setForeground(Qt.GlobalColor.darkGray)
+            self.table.setItem(row, 5, status_item)
+            
+            for col in range(1, 6):
+                self.table.item(row, col).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.btn_refresh.raise_()
+
+    def _start_muxing(self):
+        selected_tasks = self._get_selected_tasks()
+        if not selected_tasks:
+            QMessageBox.information(self, "No Selection", "Please check the box next to at least one ready file to process.")
+            return
+
+        exe_path = self.entry_exe_path.text().strip()
+        
+        self.table.setEnabled(False)
+        self.btn_run.setEnabled(False)
+        
+        self.action_worker = ActionWorker(exe_path, self.target_directory, selected_tasks)
+        self.action_worker.log_msg.connect(logger.info)
+        self.action_worker.error.connect(self._on_worker_error)
+        self.action_worker.finished.connect(self._on_worker_finished)
+        self.action_worker.start()
+
+    def _on_worker_error(self, e: str):
+        logger.error(f"Action Error: {e}")
+        QMessageBox.critical(self, "Error", f"An error occurred:\n{e}")
+
+    def _on_worker_finished(self):
+        self.table.setEnabled(True)
+        self.btn_run.setEnabled(True)
+        self.action_worker = None
+        self._refresh_table()
+
+    def closeEvent(self, event):
+        if self.action_worker and self.action_worker.isRunning():
+            self.action_worker.wait()
+        if self.scanner_worker and self.scanner_worker.isRunning():
+            self.scanner_worker.wait()
+            
+        for handler in logger.handlers[:]:
+            handler.close()
+            logger.removeHandler(handler)
+            
+        event.accept()
 
 if __name__ == "__main__":
-    app = MKVMuxerGUI()
-    app.mainloop()
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
