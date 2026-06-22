@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v1.1
+# Version: v1.2
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -12,11 +12,12 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QLineEdit, QPushButton, QTextEdit, QMessageBox, QGridLayout, 
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, 
+    QTreeWidget, QTreeWidgetItem, QHeaderView, QAbstractItemView, 
     QDialog, QStyle, QStyleOptionButton, QApplication, QFileDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QRect, QThread
 import sys
+from PyQt6.QtGui import QIcon
 
 # --- Logging Setup ---
 LOG_FILE = Path(__file__).parent / "bluefalcon-mkv-muxer.log"
@@ -78,7 +79,6 @@ class ScannerWorker(QThread):
                     "video_path": str(mkv),
                     "video_name": mkv.name,
                     "basename": basename,
-                    "attachment_names": ", ".join([f.name for f in attachments]),
                     "attachment_paths": [str(f) for f in attachments],
                     "status": status,
                     "has_attachments": bool(attachments)
@@ -120,7 +120,7 @@ class ActionWorker(QThread):
                 cmd = [self.mkvmerge_path, "-o", str(out_file), task['video_path']]
                 cmd.extend(task['attachment_paths'])
 
-                self.log_msg.emit(f"[PROCESSING] {task['video_name']}")
+                self.log_msg.emit(f"[PROCESSING] {task['basename']}")
                 
                 # Run subprocess
                 result = subprocess.run(
@@ -132,9 +132,9 @@ class ActionWorker(QThread):
                 )
                 
                 if result.returncode == 0 or result.returncode == 1:
-                    self.log_msg.emit(f"[SUCCESS] Merged: {task['video_name']}")
+                    self.log_msg.emit(f"[SUCCESS] Merged Output: {task['video_name']}")
                 else:
-                    self.log_msg.emit(f"[ERROR] Failed merging {task['video_name']}. Code: {result.returncode}")
+                    self.log_msg.emit(f"[ERROR] Failed merging {task['basename']}. Code: {result.returncode}")
                 
                 self.log_msg.emit("-" * 50)
 
@@ -191,7 +191,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.1<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.2<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -207,8 +207,13 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.1")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.2")
         self.setMinimumSize(1100, 750)
+        
+        # Load custom icon if available in the same directory
+        icon_path = Path(__file__).parent / "icon.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         
         # Core Variables
         self.target_directory = Path.cwd()
@@ -220,7 +225,7 @@ class MainWindow(QMainWindow):
         self._init_ui()
         
         logger.info(f"System initialized. Current working directory: {self.target_directory}")
-        self._refresh_table()
+        self._refresh_tree()
 
     def _apply_dark_theme(self):
         self.setStyleSheet("""
@@ -231,15 +236,15 @@ class MainWindow(QMainWindow):
             QPushButton { background-color: #A8C7FA; border: none; border-radius: 6px; color: #062E6F; font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; font-size: 14px; padding: 4px; }
             QPushButton:hover { background-color: #D3E3FD; }
             QPushButton:disabled { background-color: #44474A; color: #8E918F; }
-            QPushButton#danger { background-color: #F2B8B5; color: #601410; }
-            QPushButton#danger:hover { background-color: #F9DEDC; }
             QPushButton#overlay_btn { background-color: #2B2D31; border: 1px solid #44474A; border-radius: 6px; font-size: 16px; font-weight: bold; color: #A8C7FA; }
             QPushButton#overlay_btn:hover { background-color: #383A40; color: #D3E3FD; }
             QTextEdit { background-color: #1E1F22; border: 1px solid #44474A; color: #A0A0A0; padding: 10px; border-radius: 6px; font-family: Consolas, monospace; font-size: 13px; }
-            QTableWidget { background-color: #1E1F22; alternate-background-color: #242528; border: 1px solid #44474A; border-radius: 6px; color: #E3E3E3; gridline-color: transparent; }
+            QTreeWidget { background-color: #1E1F22; border: 1px solid #44474A; border-radius: 6px; color: #E3E3E3; outline: none; }
             QHeaderView::section { background-color: #1E1F22; color: #A8C7FA; padding: 4px; border: none; border-bottom: 1px solid #44474A; font-weight: bold; font-size: 13px; }
-            QTableWidget::item { padding: 6px; border-bottom: 1px solid #2B2D31; }
-            QTableWidget::item:selected { background-color: #35383D; }
+            QTreeWidget::item { padding: 4px 0px; border-bottom: 1px solid #2B2D31; }
+            QTreeWidget::item:selected { background-color: #35383D; }
+            QTreeWidget::branch:has-children:!has-siblings:closed, QTreeWidget::branch:closed:has-children:has-siblings { border-image: none; image: none; }
+            QTreeWidget::branch:open:has-children:!has-siblings, QTreeWidget::branch:open:has-children:has-siblings { border-image: none; image: none; }
         """)
 
     def _init_ui(self):
@@ -282,43 +287,35 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(top_bar)
 
-        # --- Data Table ---
-        table_container = QWidget()
-        table_layout = QGridLayout(table_container)
-        table_layout.setContentsMargins(0, 0, 0, 0)
+        # --- Hierarchical Data Tree ---
+        tree_container = QWidget()
+        tree_layout = QGridLayout(tree_container)
+        tree_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(4)
         
         self.checkbox_header = CheckBoxHeader(Qt.Orientation.Horizontal)
         self.checkbox_header.stateChanged.connect(self._set_all_checkboxes)
-        self.table.setHorizontalHeader(self.checkbox_header)
+        self.tree.setHeader(self.checkbox_header)
         
-        self.table.setHorizontalHeaderLabels(["", "#", "Base Name", "Video File", "Detected Attachments", "Status"])
+        self.tree.setHeaderLabels(["", "Media Group / File Name", "Type / Output", "Status"])
         
-        for i in range(6):
-            item = self.table.horizontalHeaderItem(i)
-            if item:
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setAlternatingRowColors(True)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setShowGrid(False)
+        self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setIndentation(20)
         
-        header = self.table.horizontalHeader()
+        header = self.tree.header()
         header.setMinimumHeight(46) 
         
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(0, 40)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setColumnWidth(0, 40)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         
-        table_layout.addWidget(self.table, 0, 0)
+        tree_layout.addWidget(self.tree, 0, 0)
 
         refresh_wrapper = QWidget()
         refresh_box = QVBoxLayout(refresh_wrapper)
@@ -328,11 +325,11 @@ class MainWindow(QMainWindow):
         self.btn_refresh.setObjectName("overlay_btn")
         self.btn_refresh.setFixedSize(30, 30)
         self.btn_refresh.setToolTip("Refresh Directory")
-        self.btn_refresh.clicked.connect(self._refresh_table)
+        self.btn_refresh.clicked.connect(self._refresh_tree)
         refresh_box.addWidget(self.btn_refresh)
         
-        table_layout.addWidget(refresh_wrapper, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
-        main_layout.addWidget(table_container, stretch=2)
+        tree_layout.addWidget(refresh_wrapper, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+        main_layout.addWidget(tree_container, stretch=2)
 
         # --- Log Viewer ---
         log_container = QWidget()
@@ -369,72 +366,91 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _set_all_checkboxes(self, state: Qt.CheckState):
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item and item.flags() & Qt.ItemFlag.ItemIsEnabled:
-                item.setCheckState(state)
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if item and not item.isDisabled():
+                item.setCheckState(0, state)
 
     def _get_selected_tasks(self) -> list[dict]:
         selected = []
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            if item and item.checkState() == Qt.CheckState.Checked:
-                if row in self.current_file_data:
-                    selected.append(self.current_file_data[row])
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if item and item.checkState(0) == Qt.CheckState.Checked:
+                task_index = item.data(0, Qt.ItemDataRole.UserRole)
+                if task_index is not None and task_index in self.current_file_data:
+                    selected.append(self.current_file_data[task_index])
         return selected
 
-    def _refresh_table(self):
-        self.table.setRowCount(0)
+    def _refresh_tree(self):
+        self.tree.clear()
         self.current_file_data.clear()
         
         self.scanner_worker = ScannerWorker(self.target_directory)
-        self.scanner_worker.finished.connect(self._populate_table)
+        self.scanner_worker.finished.connect(self._populate_tree)
         self.scanner_worker.error.connect(lambda e: logger.error(f"Scan Error: {e}"))
         self.scanner_worker.start()
 
-    def _populate_table(self, data: list[dict]):
-        self.table.setRowCount(len(data))
-        for row, info in enumerate(data):
-            self.current_file_data[row] = info
+    def _populate_tree(self, data: list[dict]):
+        self.tree.clear()
+        
+        for i, info in enumerate(data):
+            self.current_file_data[i] = info
             
-            chk = QTableWidgetItem()
+            # 1. Create Parent Group Item
+            parent = QTreeWidgetItem(self.tree)
+            parent.setData(0, Qt.ItemDataRole.UserRole, i) # Store index reference
+            
             if info["has_attachments"]:
-                chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+                parent.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 current_header_state = Qt.CheckState.Checked if self.checkbox_header._is_on else Qt.CheckState.Unchecked
-                chk.setCheckState(current_header_state)
+                parent.setCheckState(0, current_header_state)
             else:
-                chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable)
-                chk.setCheckState(Qt.CheckState.Unchecked)
+                parent.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable)
+                parent.setCheckState(0, Qt.CheckState.Unchecked)
+                parent.setDisabled(True)
 
-            self.table.setItem(row, 0, chk)
-            self.table.setItem(row, 1, QTableWidgetItem(str(row + 1)))
-            self.table.setItem(row, 2, QTableWidgetItem(info["basename"]))
-            self.table.setItem(row, 3, QTableWidgetItem(info["video_name"]))
+            parent.setText(1, info["basename"])
+            parent.setText(2, "Output Group" if info["has_attachments"] else "-")
+            parent.setText(3, info["status"])
             
-            att_item = QTableWidgetItem(info["attachment_names"] if info["has_attachments"] else "-")
-            if not info["has_attachments"]:
-                att_item.setForeground(Qt.GlobalColor.darkGray)
-            self.table.setItem(row, 4, att_item)
+            # Make parent bold
+            font = parent.font(1)
+            font.setBold(True)
+            parent.setFont(1, font)
+            parent.setFont(2, font)
+            parent.setFont(3, font)
+
+            # 2. Add Base Video Child
+            child_vid = QTreeWidgetItem(parent)
+            child_vid.setText(1, f"🎬 {info['video_name']}")
+            child_vid.setText(2, "Source Video")
+            child_vid.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             
-            status_item = QTableWidgetItem(info["status"])
-            if not info["has_attachments"]:
-                status_item.setForeground(Qt.GlobalColor.darkGray)
-            self.table.setItem(row, 5, status_item)
-            
-            for col in range(1, 6):
-                self.table.item(row, col).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            # 3. Add Attachment Children
+            for att_path in info["attachment_paths"]:
+                att_name = os.path.basename(att_path)
+                ext = att_name.lower().split('.')[-1]
+                icon = "🎵" if ext == 'mka' else "📝"
+                
+                child_att = QTreeWidgetItem(parent)
+                child_att.setText(1, f"{icon} {att_name}")
+                child_att.setText(2, "Audio Track" if ext == 'mka' else "Subtitle Track")
+                child_att.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+
+            # Keep items expanded so the user sees exactly what is grouped
+            parent.setExpanded(True)
 
         self.btn_refresh.raise_()
 
     def _start_muxing(self):
         selected_tasks = self._get_selected_tasks()
         if not selected_tasks:
-            QMessageBox.information(self, "No Selection", "Please check the box next to at least one ready file to process.")
+            QMessageBox.information(self, "No Selection", "Please check the box next to at least one ready group to process.")
             return
 
         exe_path = self.entry_exe_path.text().strip()
         
-        self.table.setEnabled(False)
+        self.tree.setEnabled(False)
         self.btn_run.setEnabled(False)
         
         self.action_worker = ActionWorker(exe_path, self.target_directory, selected_tasks)
@@ -448,10 +464,10 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Error", f"An error occurred:\n{e}")
 
     def _on_worker_finished(self):
-        self.table.setEnabled(True)
+        self.tree.setEnabled(True)
         self.btn_run.setEnabled(True)
         self.action_worker = None
-        self._refresh_table()
+        self._refresh_tree()
 
     def closeEvent(self, event):
         if self.action_worker and self.action_worker.isRunning():
