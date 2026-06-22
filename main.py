@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v1.3
+# Version: v1.4
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -50,9 +50,10 @@ class ScannerWorker(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, target_dir: Path):
+    def __init__(self, target_dir: Path, output_dir_str: str):
         super().__init__()
         self.target_dir = target_dir
+        self.output_dir_str = output_dir_str
 
     def run(self):
         try:
@@ -61,6 +62,9 @@ class ScannerWorker(QThread):
                 self.finished.emit(data)
                 return
 
+            # Determine the output path to check for "Done" status
+            out_path = Path(self.output_dir_str) if self.output_dir_str else self.target_dir / "output"
+            
             mkv_files = [f for f in self.target_dir.iterdir() if f.is_file() and f.suffix.lower() == '.mkv']
             
             for mkv in mkv_files:
@@ -73,7 +77,14 @@ class ScannerWorker(QThread):
                         if f.suffix.lower() in ['.mka', '.srt', '.ass', '.ssa', '.vtt', '.sup']:
                             attachments.append(f)
                 
-                status = "Ready" if attachments else "No Attachments"
+                # Check if this file has already been muxed
+                expected_out_file = out_path / mkv.name
+                if expected_out_file.exists():
+                    status = "Done"
+                elif attachments:
+                    status = "Ready"
+                else:
+                    status = "No Attachments"
                 
                 data.append({
                     "video_path": str(mkv),
@@ -93,10 +104,11 @@ class ActionWorker(QThread):
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, mkvmerge_path: str, target_dir: Path, tasks: list):
+    def __init__(self, mkvmerge_path: str, target_dir: Path, output_dir_str: str, tasks: list):
         super().__init__()
         self.mkvmerge_path = mkvmerge_path
         self.target_dir = target_dir
+        self.output_dir_str = output_dir_str
         self.tasks = tasks
 
     def run(self):
@@ -106,8 +118,8 @@ class ActionWorker(QThread):
                 self.finished.emit()
                 return
 
-            output_dir = self.target_dir / "output"
-            output_dir.mkdir(exist_ok=True)
+            output_dir = Path(self.output_dir_str) if self.output_dir_str else self.target_dir / "output"
+            output_dir.mkdir(exist_ok=True, parents=True)
             self.log_msg.emit(f"[INFO] Output directory ready at: {output_dir}")
             self.log_msg.emit("=" * 50)
 
@@ -191,7 +203,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.3<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.4<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -207,8 +219,8 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.3")
-        self.setMinimumSize(1100, 750)
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.4")
+        self.setMinimumSize(1200, 750)
         
         icon_path = Path(__file__).parent / "icon.ico"
         if icon_path.exists():
@@ -256,24 +268,41 @@ class MainWindow(QMainWindow):
         top_bar = QHBoxLayout()
         top_bar.setSpacing(10)
         
-        lbl_path = QLabel("mkvmerge.exe:")
-        lbl_path.setStyleSheet("font-weight: bold;")
-        top_bar.addWidget(lbl_path)
+        lbl_exe_path = QLabel("mkvmerge.exe:")
+        lbl_exe_path.setStyleSheet("font-weight: bold; font-size: 13px;")
+        top_bar.addWidget(lbl_exe_path)
 
         self.entry_exe_path = QLineEdit()
         self.entry_exe_path.setText(r"C:\Program Files\MKVToolNix\mkvmerge.exe")
-        self.entry_exe_path.setFixedSize(300, 36)
+        self.entry_exe_path.setFixedSize(250, 36)
         top_bar.addWidget(self.entry_exe_path)
 
         btn_browse_exe = QPushButton("Browse")
         btn_browse_exe.setFixedSize(80, 36)
         btn_browse_exe.clicked.connect(self._browse_exe)
         top_bar.addWidget(btn_browse_exe)
+        
+        # Spacer between inputs
+        top_bar.addSpacing(20)
+
+        lbl_out_path = QLabel("Output:")
+        lbl_out_path.setStyleSheet("font-weight: bold; font-size: 13px;")
+        top_bar.addWidget(lbl_out_path)
+
+        self.entry_out_path = QLineEdit()
+        self.entry_out_path.setPlaceholderText("Default: ./output")
+        self.entry_out_path.setFixedSize(250, 36)
+        top_bar.addWidget(self.entry_out_path)
+
+        btn_browse_out = QPushButton("Browse")
+        btn_browse_out.setFixedSize(80, 36)
+        btn_browse_out.clicked.connect(self._browse_output)
+        top_bar.addWidget(btn_browse_out)
 
         top_bar.addStretch()
 
         self.btn_run = QPushButton("Run Batch Muxer")
-        self.btn_run.setFixedSize(180, 36)
+        self.btn_run.setFixedSize(160, 36)
         self.btn_run.clicked.connect(self._start_muxing)
         top_bar.addWidget(self.btn_run)
 
@@ -297,7 +326,7 @@ class MainWindow(QMainWindow):
         self.checkbox_header.stateChanged.connect(self._set_all_checkboxes)
         self.tree.setHeader(self.checkbox_header)
         
-        self.tree.setHeaderLabels(["", "Media Group / File Name", "Type / Output", "Status"])
+        self.tree.setHeaderLabels(["", "Media Group / File Name", "Type", "Status"])
         
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -305,27 +334,27 @@ class MainWindow(QMainWindow):
         self.tree.setIndentation(20)
         self.tree.setWordWrap(False)
         
-        # Horizontal scrolling configuration to prevent elements from going off-screen invisibly
-        self.tree.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
         header = self.tree.header()
         header.setMinimumHeight(46) 
         header.setStretchLastSection(False) 
         
-        # Interactive columns with intelligent default widths to maintain viewability
+        # Center align headers
+        for i in range(4):
+            header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Explicit column sizing to prevent off-screen issues while maintaining layout
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.tree.setColumnWidth(0, 50)
+        self.tree.setColumnWidth(0, 40)
         
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        self.tree.setColumnWidth(1, 550) 
+        # Filename takes up remaining space and will gracefully truncate with ... if too long
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        self.tree.setColumnWidth(2, 150)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        self.tree.setColumnWidth(2, 140)
         
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.tree.setColumnWidth(3, 100)
         
-        # Connect checkbox cascade logic
         self.tree.itemChanged.connect(self._on_item_changed)
         
         tree_layout.addWidget(self.tree, 0, 0)
@@ -373,25 +402,26 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select mkvmerge.exe", "", "Executable Files (*.exe)")
         if file_path:
             self.entry_exe_path.setText(file_path)
+            
+    def _browse_output(self):
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        if folder_path:
+            self.entry_out_path.setText(folder_path)
 
     def _show_about(self):
         dlg = AboutDialog(self)
         dlg.exec()
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int):
-        # Handle 3-state checkbox logic cascading between parent and children
         if column == 0:
             self.tree.blockSignals(True)
             state = item.checkState(0)
             
-            # If the interacted item is a Parent
             if item.parent() is None:
                 for i in range(item.childCount()):
                     child = item.child(i)
                     if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                         child.setCheckState(0, state)
-            
-            # If the interacted item is a Child
             else:
                 parent = item.parent()
                 checked_count = 0
@@ -430,7 +460,6 @@ class MainWindow(QMainWindow):
         for i in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(i)
             
-            # Only process if the parent is fully or partially checked
             if parent and parent.checkState(0) != Qt.CheckState.Unchecked:
                 task_index = parent.data(0, Qt.ItemDataRole.UserRole)
                 
@@ -440,7 +469,6 @@ class MainWindow(QMainWindow):
                     selected_attachments = []
                     video_selected = False
                     
-                    # Interrogate children to see exactly which files are checked
                     for j in range(parent.childCount()):
                         child = parent.child(j)
                         if child.checkState(0) == Qt.CheckState.Checked:
@@ -450,7 +478,6 @@ class MainWindow(QMainWindow):
                             else:
                                 selected_attachments.append(path)
                                 
-                    # Only execute if the core video is checked and at least one attachment is provided
                     if video_selected and selected_attachments:
                         task = base_info.copy()
                         task["attachment_paths"] = selected_attachments
@@ -461,7 +488,8 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         self.current_file_data.clear()
         
-        self.scanner_worker = ScannerWorker(self.target_directory)
+        out_str = self.entry_out_path.text().strip()
+        self.scanner_worker = ScannerWorker(self.target_directory, out_str)
         self.scanner_worker.finished.connect(self._populate_tree)
         self.scanner_worker.error.connect(lambda e: logger.error(f"Scan Error: {e}"))
         self.scanner_worker.start()
@@ -486,20 +514,25 @@ class MainWindow(QMainWindow):
                 parent.setDisabled(True)
 
             parent.setText(1, f"📁 {info['basename']}")
-            parent.setText(2, "Output Group" if info["has_attachments"] else "-")
+            parent.setText(2, "") # Parent Type is intentionally blank per visual requirements
             parent.setText(3, info["status"])
+            
+            parent.setTextAlignment(2, Qt.AlignmentFlag.AlignCenter)
+            parent.setTextAlignment(3, Qt.AlignmentFlag.AlignCenter)
             
             font = parent.font(1)
             font.setBold(True)
             parent.setFont(1, font)
-            parent.setFont(2, font)
             parent.setFont(3, font)
 
             # 2. Add Base Video Child
             child_vid = QTreeWidgetItem(parent)
             child_vid.setText(1, f"🎬 {info['video_name']}")
             child_vid.setText(2, "Source Video")
+            child_vid.setText(3, "") # Child Status is blank
             child_vid.setData(0, Qt.ItemDataRole.UserRole, info["video_path"])
+            
+            child_vid.setTextAlignment(2, Qt.AlignmentFlag.AlignCenter)
             
             if info["has_attachments"]:
                 child_vid.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -516,7 +549,10 @@ class MainWindow(QMainWindow):
                 child_att = QTreeWidgetItem(parent)
                 child_att.setText(1, f"{icon} {att_name}")
                 child_att.setText(2, "Audio Track" if ext == 'mka' else "Subtitle Track")
+                child_att.setText(3, "")
                 child_att.setData(0, Qt.ItemDataRole.UserRole, att_path)
+                
+                child_att.setTextAlignment(2, Qt.AlignmentFlag.AlignCenter)
                 
                 child_att.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 child_att.setCheckState(0, current_header_state)
@@ -533,11 +569,12 @@ class MainWindow(QMainWindow):
             return
 
         exe_path = self.entry_exe_path.text().strip()
+        out_str = self.entry_out_path.text().strip()
         
         self.tree.setEnabled(False)
         self.btn_run.setEnabled(False)
         
-        self.action_worker = ActionWorker(exe_path, self.target_directory, selected_tasks)
+        self.action_worker = ActionWorker(exe_path, self.target_directory, out_str, selected_tasks)
         self.action_worker.log_msg.connect(logger.info)
         self.action_worker.error.connect(self._on_worker_error)
         self.action_worker.finished.connect(self._on_worker_finished)
