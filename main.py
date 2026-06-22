@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v1.8
+# Version: v1.9
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -223,7 +223,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.8<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.9<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -239,7 +239,7 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.8")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.9")
         self.setMinimumSize(1200, 750)
         
         icon_path = Path(__file__).parent / "icon.ico"
@@ -272,7 +272,7 @@ class MainWindow(QMainWindow):
             QPushButton#overlay_btn:hover { background-color: #383A40; color: #D3E3FD; }
             QTextEdit { background-color: #1E1F22; border: 1px solid #44474A; color: #A0A0A0; padding: 10px; border-radius: 6px; font-family: Consolas, monospace; font-size: 13px; }
             QTableWidget { background-color: #1E1F22; border: 1px solid #44474A; border-radius: 6px; color: #E3E3E3; gridline-color: transparent; outline: none; }
-            QHeaderView::section { background-color: #1E1F22; color: #A8C7FA; padding: 4px; border: none; border-bottom: 1px solid #44474A; font-weight: bold; font-size: 13px; }
+            QHeaderView::section { background-color: #1E1F22; color: #A8C7FA; padding: 8px; border: none; border-bottom: 1px solid #44474A; font-weight: bold; font-size: 13px; }
             QTableWidget::item { padding: 8px; border-bottom: 1px solid #2B2D31; }
             QTableWidget::item:selected { background-color: #35383D; color: #FFFFFF; }
             QSplitter::handle { background-color: #44474A; width: 2px; }
@@ -362,6 +362,10 @@ class MainWindow(QMainWindow):
         self.header_master.stateChanged.connect(self._master_header_toggled)
         self.table_master.setHorizontalHeader(self.header_master)
         self.table_master.setHorizontalHeaderLabels(["", "Media Group", "Status"])
+        
+        # Enforce strict left alignment for Master headers
+        self.table_master.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        
         self.table_master.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_master.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table_master.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -396,6 +400,10 @@ class MainWindow(QMainWindow):
         self.header_detail.stateChanged.connect(self._detail_header_toggled)
         self.table_detail.setHorizontalHeader(self.header_detail)
         self.table_detail.setHorizontalHeaderLabels(["", "Track File Name", "Type"])
+        
+        # Enforce strict left alignment for Detail headers
+        self.table_detail.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
         self.table_detail.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_detail.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_detail.verticalHeader().setVisible(False)
@@ -497,14 +505,13 @@ class MainWindow(QMainWindow):
             name_item.setFont(font)
             self.table_master.setItem(row, 1, name_item)
             
-            # Status
+            # Status (Now rigidly left-aligned to match the header)
             status_item = QTableWidgetItem(info["status"])
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table_master.setItem(row, 2, status_item)
 
         self.table_master.blockSignals(False)
         
-        # Auto-select first item if available
         if self.table_master.rowCount() > 0:
             self.table_master.selectRow(0)
 
@@ -562,8 +569,9 @@ class MainWindow(QMainWindow):
             name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table_detail.setItem(row, 1, name_item)
             
+            # Type (Now rigidly left-aligned to match the header)
             type_item = QTableWidgetItem(track["type"])
-            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table_detail.setItem(row, 2, type_item)
             
         self.header_detail.blockSignals(True)
