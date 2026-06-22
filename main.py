@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v1.4
+# Version: v1.5
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -50,10 +50,9 @@ class ScannerWorker(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, target_dir: Path, output_dir_str: str):
+    def __init__(self, target_dir: Path):
         super().__init__()
         self.target_dir = target_dir
-        self.output_dir_str = output_dir_str
 
     def run(self):
         try:
@@ -62,9 +61,6 @@ class ScannerWorker(QThread):
                 self.finished.emit(data)
                 return
 
-            # Determine the output path to check for "Done" status
-            out_path = Path(self.output_dir_str) if self.output_dir_str else self.target_dir / "output"
-            
             mkv_files = [f for f in self.target_dir.iterdir() if f.is_file() and f.suffix.lower() == '.mkv']
             
             for mkv in mkv_files:
@@ -77,21 +73,11 @@ class ScannerWorker(QThread):
                         if f.suffix.lower() in ['.mka', '.srt', '.ass', '.ssa', '.vtt', '.sup']:
                             attachments.append(f)
                 
-                # Check if this file has already been muxed
-                expected_out_file = out_path / mkv.name
-                if expected_out_file.exists():
-                    status = "Done"
-                elif attachments:
-                    status = "Ready"
-                else:
-                    status = "No Attachments"
-                
                 data.append({
                     "video_path": str(mkv),
                     "video_name": mkv.name,
                     "basename": basename,
                     "attachment_paths": [str(f) for f in attachments],
-                    "status": status,
                     "has_attachments": bool(attachments)
                 })
                 
@@ -203,7 +189,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.4<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v1.5<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -219,7 +205,7 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.4")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v1.5")
         self.setMinimumSize(1200, 750)
         
         icon_path = Path(__file__).parent / "icon.ico"
@@ -282,7 +268,6 @@ class MainWindow(QMainWindow):
         btn_browse_exe.clicked.connect(self._browse_exe)
         top_bar.addWidget(btn_browse_exe)
         
-        # Spacer between inputs
         top_bar.addSpacing(20)
 
         lbl_out_path = QLabel("Output:")
@@ -320,13 +305,15 @@ class MainWindow(QMainWindow):
         tree_layout.setContentsMargins(0, 0, 0, 0)
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(4)
+        
+        # Reduced to 3 columns: Checkbox, Name, Type (Status removed)
+        self.tree.setColumnCount(3)
         
         self.checkbox_header = CheckBoxHeader(Qt.Orientation.Horizontal)
         self.checkbox_header.stateChanged.connect(self._set_all_checkboxes)
         self.tree.setHeader(self.checkbox_header)
         
-        self.tree.setHeaderLabels(["", "Media Group / File Name", "Type", "Status"])
+        self.tree.setHeaderLabels(["", "Media Group / File Name", "Type"])
         
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -334,26 +321,25 @@ class MainWindow(QMainWindow):
         self.tree.setIndentation(20)
         self.tree.setWordWrap(False)
         
+        self.tree.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
         header = self.tree.header()
         header.setMinimumHeight(46) 
         header.setStretchLastSection(False) 
         
         # Center align headers
-        for i in range(4):
+        for i in range(3):
             header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Explicit column sizing to prevent off-screen issues while maintaining layout
+        # Explicit column sizing to maximize horizontal breathing room
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.tree.setColumnWidth(0, 40)
         
-        # Filename takes up remaining space and will gracefully truncate with ... if too long
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.tree.setColumnWidth(2, 140)
-        
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.tree.setColumnWidth(3, 100)
+        self.tree.setColumnWidth(2, 160)
         
         self.tree.itemChanged.connect(self._on_item_changed)
         
@@ -488,8 +474,7 @@ class MainWindow(QMainWindow):
         self.tree.clear()
         self.current_file_data.clear()
         
-        out_str = self.entry_out_path.text().strip()
-        self.scanner_worker = ScannerWorker(self.target_directory, out_str)
+        self.scanner_worker = ScannerWorker(self.target_directory)
         self.scanner_worker.finished.connect(self._populate_tree)
         self.scanner_worker.error.connect(lambda e: logger.error(f"Scan Error: {e}"))
         self.scanner_worker.start()
@@ -514,22 +499,18 @@ class MainWindow(QMainWindow):
                 parent.setDisabled(True)
 
             parent.setText(1, f"📁 {info['basename']}")
-            parent.setText(2, "") # Parent Type is intentionally blank per visual requirements
-            parent.setText(3, info["status"])
+            parent.setText(2, "Output Group" if info["has_attachments"] else "-")
             
             parent.setTextAlignment(2, Qt.AlignmentFlag.AlignCenter)
-            parent.setTextAlignment(3, Qt.AlignmentFlag.AlignCenter)
             
             font = parent.font(1)
             font.setBold(True)
             parent.setFont(1, font)
-            parent.setFont(3, font)
 
             # 2. Add Base Video Child
             child_vid = QTreeWidgetItem(parent)
             child_vid.setText(1, f"🎬 {info['video_name']}")
             child_vid.setText(2, "Source Video")
-            child_vid.setText(3, "") # Child Status is blank
             child_vid.setData(0, Qt.ItemDataRole.UserRole, info["video_path"])
             
             child_vid.setTextAlignment(2, Qt.AlignmentFlag.AlignCenter)
@@ -549,7 +530,6 @@ class MainWindow(QMainWindow):
                 child_att = QTreeWidgetItem(parent)
                 child_att.setText(1, f"{icon} {att_name}")
                 child_att.setText(2, "Audio Track" if ext == 'mka' else "Subtitle Track")
-                child_att.setText(3, "")
                 child_att.setData(0, Qt.ItemDataRole.UserRole, att_path)
                 
                 child_att.setTextAlignment(2, Qt.AlignmentFlag.AlignCenter)
