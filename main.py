@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v2.0
+# Version: v2.1
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -20,8 +20,24 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject, QRect, QThread
 import sys
 from PyQt6.QtGui import QIcon
 
+# --- Helper for PyInstaller Paths ---
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller onefile """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 # --- Logging Setup ---
-LOG_FILE = Path(__file__).parent / "bluefalcon-mkv-muxer.log"
+# Save log in the folder where the .exe actually is (not the temp folder)
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+else:
+    application_path = os.path.dirname(os.path.abspath(__file__))
+    
+LOG_FILE = Path(application_path) / "bluefalcon-mkv-muxer.log"
 
 class GUILogHandler(logging.Handler, QObject):
     log_signal = pyqtSignal(str)
@@ -83,7 +99,6 @@ class ScannerWorker(QThread):
                 else:
                     status = "No Attachments"
                 
-                # Build unified track list
                 tracks = []
                 tracks.append({
                     "name": mkv.name,
@@ -223,7 +238,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v2.0<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v2.1<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -239,14 +254,15 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v2.0")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v2.1")
         self.setMinimumSize(1200, 750)
         
-        icon_path = Path(__file__).parent / "icon.ico"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
+        # Correctly load the bundled icon at runtime
+        icon_path = get_resource_path("icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
-        self.target_directory = Path.cwd()
+        self.target_directory = Path(application_path)
         self.scanner_worker = None
         self.action_worker = None
         
@@ -347,7 +363,6 @@ class MainWindow(QMainWindow):
         
         # 1. Left Panel (Master)
         left_panel = QWidget()
-        # Enforce minimum width to prevent unreadable column crushing
         left_panel.setMinimumWidth(300) 
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -357,7 +372,6 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(lbl_master)
 
         self.table_master = QTableWidget()
-        # Allow horizontal scrolling if panels are squished excessively
         self.table_master.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table_master.setColumnCount(3)
         
@@ -366,7 +380,6 @@ class MainWindow(QMainWindow):
         self.table_master.setHorizontalHeader(self.header_master)
         self.table_master.setHorizontalHeaderLabels(["", "Media Group", "Status"])
         
-        # Enforce strict left alignment for Master headers
         self.table_master.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         
         self.table_master.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -388,7 +401,6 @@ class MainWindow(QMainWindow):
         
         # 2. Right Panel (Detail)
         right_panel = QWidget()
-        # Enforce minimum width to prevent unreadable column crushing
         right_panel.setMinimumWidth(400)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -406,7 +418,6 @@ class MainWindow(QMainWindow):
         self.table_detail.setHorizontalHeader(self.header_detail)
         self.table_detail.setHorizontalHeaderLabels(["", "Track File Name", "Type"])
         
-        # Enforce strict left alignment for Detail headers
         self.table_detail.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         self.table_detail.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -510,14 +521,13 @@ class MainWindow(QMainWindow):
             name_item.setFont(font)
             self.table_master.setItem(row, 1, name_item)
             
-            # Status (Now rigidly left-aligned to match the header)
+            # Status
             status_item = QTableWidgetItem(info["status"])
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table_master.setItem(row, 2, status_item)
 
         self.table_master.blockSignals(False)
         
-        # Auto-select first item if available
         if self.table_master.rowCount() > 0:
             self.table_master.selectRow(0)
 
@@ -575,7 +585,6 @@ class MainWindow(QMainWindow):
             name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table_detail.setItem(row, 1, name_item)
             
-            # Type (Now rigidly left-aligned to match the header)
             type_item = QTableWidgetItem(track["type"])
             type_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table_detail.setItem(row, 2, type_item)
@@ -665,7 +674,13 @@ class MainWindow(QMainWindow):
             
         event.accept()
 
+# Windows specifically needs this AppUserModelID to group taskbar icons correctly
 if __name__ == "__main__":
+    if os.name == 'nt':
+        import ctypes
+        myappid = 'bluefalcon.mkvbatchmuxer.2.1'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

@@ -13,7 +13,7 @@
 
 A high-performance Windows tool designed to automate the merging of MKV video files with their corresponding external audio (MKA) and subtitle (SRT, ASS, VTT) tracks. Built with a modern dual-panel dashboard, it allows you to process entire folders of episodes or movies at once, while giving you granular control over exactly which audio and subtitle tracks are kept.
 
-<br>
+![alt text](<Screenshot 2026-06-23 134231.png>)
 
 ## 📥 Getting Started (Installation)
 
