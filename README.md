@@ -5,7 +5,7 @@
 **A powerful, native PyQt6 desktop application to automate batch MKV multiplexing.**
 
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
-[![Version](https://img.shields.io/badge/Version-v2.2-007AFF?style=for-the-badge)](#)
+[![Version](https://img.shields.io/badge/Version-v2.3-007AFF?style=for-the-badge)](#)
 [![Language](https://img.shields.io/badge/Written%20in-Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
@@ -24,9 +24,10 @@ Easily merge hundreds of MP4 video files with their matching SRT subtitle files 
 <br>
 
 ## 🚀 How to Use
-1. **Download:** Go to the **[Releases](../../releases/latest)** tab and download the latest executable.
-2. **Run:** Double-click the downloaded `.exe` file (no installation required).
-3. **Enjoy:** Select your video/subtitle folders and click Mux!
+1. **Prerequisite:** Download and install the official [MKVToolNix](https://mkvtoolnix.download/) software (this tool uses it under the hood).
+2. **Download App:** Go to the **[Releases](../../releases/latest)** tab and download the latest executable.
+3. **Run:** Double-click the downloaded `.exe` file (no installation required).
+4. **Enjoy:** Select your video/subtitle folders and click Mux!
 
 <br>
 
