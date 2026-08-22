@@ -1,5 +1,5 @@
 # ==========================================
-# Version: v2.3
+# Version: v2.4
 # BlueFalcon MKV Batch Muxer
 # ==========================================
 
@@ -238,7 +238,7 @@ class AboutDialog(QDialog):
         
         layout = QVBoxLayout(self)
         title = QLabel(
-            "<b>BlueFalcon MKV Batch Muxer</b><br>v2.3<br><br>"
+            "<b>BlueFalcon MKV Batch Muxer</b><br>v2.4<br><br>"
             "Created by BlueFalcon<br><br>"
             "<a href='https://github.com/bluefalcon2270/bluefalcon-mkv-batch-muxer'>GitHub Repository</a>"
         )
@@ -254,7 +254,7 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BlueFalcon MKV Batch Muxer v2.3")
+        self.setWindowTitle("BlueFalcon MKV Batch Muxer v2.4")
         self.setMinimumSize(1200, 750)
         
         # Correctly load the bundled icon at runtime
@@ -678,10 +678,15 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     if os.name == 'nt':
         import ctypes
-        myappid = 'bluefalcon.mkvbatchmuxer.2.3'
+        myappid = 'bluefalcon.mkvbatchmuxer.2.4'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         
     app = QApplication(sys.argv)
+    
+    icon_path = get_resource_path("icon.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
